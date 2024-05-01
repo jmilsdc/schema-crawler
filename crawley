@@ -1,0 +1,114 @@
+import requests
+from bs4 import BeautifulSoup
+import json
+import pandas as pd
+
+# Define specificity categories and corresponding weights
+specificity_weights = {
+    # Lowest specificity
+    'webpage': 1,
+    'website': 1,
+    'breadcrumblist': 1,
+    'searchaction': 1,
+    # Slightly more specific
+    'organization': 2,
+    'corporation': 2,
+    'person': 2,
+    'blogposting': 2,
+    'article': 2,
+    'profilepage': 2,
+    'imageobject': 2,
+    'contactpoint': 2,
+    'webpageelement': 2,
+    # Slightly more specific
+    'faqpage': 3,
+    'aboutpage': 3,
+    'collectionpage': 3,
+    'product': 3,
+    'event': 3,
+    # More Specific
+    'softwareapplication': 4,
+    'service': 4,
+    # Most specific
+    # Add other types here with higher weights
+}
+
+def extract_schema_types(script_tags):
+    schema_types = []
+
+    for script in script_tags:
+        try:
+            data = json.loads(script.string)
+            if isinstance(data, dict):
+                if '@type' in data:
+                    schema_types.append(data['@type'].lower())
+                elif '@graph' in data:
+                    for item in data['@graph']:
+                        if '@type' in item:
+                            schema_types.append(item['@type'].lower())
+        except json.JSONDecodeError:
+            continue
+
+    return schema_types
+
+def classify_schema_type(schema_types):
+    if 'webpage' in schema_types:
+        return 'webpage'
+    elif any(t in schema_types for t in {'article', 'blogposting'}):
+        return 'article'
+    elif 'website' in schema_types:
+        return 'website'
+    elif not schema_types:
+        return None  # No schema types found
+    else:
+        return 'look closer'
+
+def compute_entity_score(schema_types):
+    scores = [specificity_weights.get(entity, 5) for entity in schema_types]
+    if scores:
+        return sum(scores) / len(scores)
+    else:
+        return 0  # Default score if no types are found
+
+def process_url(url):
+    try:
+        response = requests.get(url)
+        response.raise_for_status()  # Raise an exception for HTTP errors
+
+        soup = BeautifulSoup(response.content, 'html.parser')
+        script_tags = soup.find_all('script', type='application/ld+json')
+
+        schema_types = extract_schema_types(script_tags)
+        classification = classify_schema_type(schema_types)
+        entity_score = compute_entity_score(schema_types)
+        additional_entities = ', '.join(schema_types[1:]) if len(schema_types) > 1 else 'NA'
+
+        return {
+            'URL': url,
+            'Primary Entity': classification,
+            'Entity Score': entity_score,
+            'Classification': classification,
+            'Additional Entities': additional_entities
+        }
+
+    except requests.exceptions.RequestException as e:
+        print(f"Error fetching {url}: {e}")
+        return {
+            'URL': url,
+            'Primary Entity': 'error',
+            'Entity Score': 0,
+            'Classification': 'error',
+            'Additional Entities': 'error'
+        }
+
+def extract_and_display_schema_data(urls):
+    results = [process_url(url) for url in urls]
+    df = pd.DataFrame(results, columns=['URL', 'Primary Entity', 'Entity Score', 'Classification', 'Additional Entities'])
+    display(df)
+
+# Example usage, enter URLs in single quotations separated by commas
+urls_to_check = [
+''
+]
+
+extract_and_display_schema_data(urls_to_check)
